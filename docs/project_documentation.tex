@@ -1,0 +1,203 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{longtable}
+\usepackage{array}
+
+\geometry{margin=2.5cm}
+
+\title{Project Arduino A2\\Technical Documentation}
+\author{Project Arduino A2 Contributors}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Overview}
+
+Project Arduino A2 is an open-source firmware stack for the Arduino Uno. It aggregates multiple sensors (DHT11, BH1750, GY-GPS6MV2, DS1307 RTC) and an RGB LED actuator while logging environmental data to an SD card. Each hardware feature is wrapped in a small module with a consistent \texttt{init} / \texttt{update} interface, keeping the application loop responsive and the code base easy to extend.
+
+\section{Repository Structure}
+
+\begin{longtable}{>{\ttfamily}p{0.35\linewidth}p{0.6\linewidth}}
+\textbf{Path} & \textbf{Description} \\
+\hline
+platformio.ini & PlatformIO build configuration and dependency declarations. \\
+src/main.cpp & Firmware entry point that orchestrates module initialisation and updates. \\
+src/actuators/rgb/ & RGB LED module (non-blocking colour cycle). \\
+src/sensors/dht/ & DHT11 temperature/humidity module with cached readings. \\
+src/sensors/bh1750/ & BH1750 light sensor module with address auto-detection. \\
+src/sensors/gps/ & TinyGPS++ based GPS module (GY-GPS6MV2). \\
+src/sensors/rtc/ & DS1307 real-time clock (TinyRTC) module. \\
+src/storage/sd/ & SD card logger module writing CSV data. \\
+docs/project\_documentation.tex & This documentation file. \\
+\end{longtable}
+
+\section{Hardware Requirements}
+
+\subsection{Bill of Materials}
+
+\begin{itemize}
+  \item Arduino Uno (ATmega328P) or pin-compatible board.
+  \item DHT11 temperature/humidity sensor (with 10\,k$\Omega$ pull-up if using the bare sensor).
+  \item BH1750 digital light sensor breakout (GY-302 or similar).
+  \item TinyRTC breakout (DS1307 RTC with backup battery).
+  \item GY-GPS6MV2 GPS module (u-blox NEO-6M).
+  \item SD card breakout/shield (3.3\,V logic; uses SPI bus).
+  \item Common-anode RGB LED plus three current-limiting resistors.
+  \item Breadboard / wiring harness and jumpers.
+\end{itemize}
+
+\subsection{Pin Assignments}
+
+\begin{longtable}{>{\ttfamily}p{0.26\linewidth}p{0.18\linewidth}p{0.46\linewidth}}
+\textbf{Device} & \textbf{Arduino Pin} & \textbf{Notes} \\
+\hline
+DHT11 DATA & D2 & Internal pull-up enabled in firmware. \\
+BH1750 SDA & A4 & I\textsuperscript{2}C data (ensure pull-up to VCC, typically on breakout). \\
+BH1750 SCL & A5 & I\textsuperscript{2}C clock. \\
+TinyRTC SDA & A4 & Shares I\textsuperscript{2}C bus with BH1750. \\
+TinyRTC SCL & A5 & Shares I\textsuperscript{2}C bus with BH1750. \\
+GPS TX & D4 & Feeds SoftwareSerial RX. \\
+GPS RX & D3 & Optional (only if sending commands back; use level shifter). \\
+RGB LED RED & D5 & PWM capable; common-anode LED expected. \\
+RGB LED GREEN & D6 & PWM capable. \\
+RGB LED BLUE & D9 & PWM capable. \\
+SD CS & D10 & Chip-select for SD card. \\
+SD MOSI & D11 & SPI MOSI. \\
+SD MISO & D12 & SPI MISO. \\
+SD SCK & D13 & SPI clock. \\
+VCC / GND & 5\,V / GND & Shared across all modules (GPS may prefer 3.3\,V logic on RX). \\
+\end{longtable}
+
+\section{Software Setup}
+
+\subsection{Toolchain}
+\begin{enumerate}
+  \item Install \href{https://platformio.org/}{PlatformIO IDE} or the PlatformIO Core CLI.
+  \item Connect the Arduino Uno via USB; PlatformIO auto-detects the toolchain.
+  \item Install a LaTeX distribution if you plan to compile this document.
+\end{enumerate}
+
+\subsection{Dependencies}
+
+The following libraries are declared in \texttt{platformio.ini} and retrieved automatically:
+\begin{itemize}
+  \item \texttt{adafruit/DHT sensor library@{\^}1.4.6}
+  \item \texttt{adafruit/Adafruit Unified Sensor@{\^}1.1.15}
+  \item \texttt{claws/BH1750@{\^}1.3.0}
+  \item \texttt{mikalhart/TinyGPSPlus@{\^}1.1.0}
+  \item \texttt{arduino-libraries/SD@{\^}1.2.4}
+  \item \texttt{adafruit/RTClib@{\^}2.1.4}
+\end{itemize}
+
+\subsection{Build and Upload}
+
+\begin{enumerate}
+  \item From the project root run \texttt{pio run} to compile.
+  \item Upload with \texttt{pio run -t upload}; use \texttt{--upload-port} if necessary.
+  \item Open the serial monitor via \texttt{pio device monitor --baud 9600}.
+\end{enumerate}
+
+\section{Module Overview}
+
+\subsection{RGB LED Actuator}
+
+\begin{itemize}
+  \item Files: \texttt{src/actuators/rgb/rgbled.*}
+  \item PWM on pins D5/D6/D9; assumes common-anode LED (set \texttt{COMMON\_ANODE} accordingly).
+  \item Exposes \texttt{rgbInit()} and \texttt{rgbUpdate(now)} for non-blocking colour cycling.
+\end{itemize}
+
+\subsection{DHT11 Sensor}
+
+\begin{itemize}
+  \item Files: \texttt{src/sensors/dht/dhtsensor.*}
+  \item Provides \texttt{dhtInit()}, \texttt{dhtUpdate(now)} plus accessors for the latest reading.
+  \item Maintains cached humidity/temperature values for other modules (e.g., SD logging).
+\end{itemize}
+
+\subsection{BH1750 Sensor}
+
+\begin{itemize}
+  \item Files: \texttt{src/sensors/bh1750/bh1750sensor.*}
+  \item Automatically tries both I\textsuperscript{2}C addresses (0x23 and 0x5C) during init.
+  \item Logs lux readings every second when the sensor is available.
+\end{itemize}
+
+\subsection{GPS Module}
+
+\begin{itemize}
+  \item Files: \texttt{src/sensors/gps/gpssensor.*}
+  \item Uses \texttt{SoftwareSerial} on D4/D3 and TinyGPS++ to parse NMEA sentences.
+  \item Prints satellite count, HDOP, UTC time, and fix status every second.
+\end{itemize}
+
+\subsection{RTC Module}
+
+\begin{itemize}
+  \item Files: \texttt{src/sensors/rtc/rtcsensor.*}
+  \item Talks to the DS1307 on the TinyRTC board to obtain wall-clock timestamps.
+  \item Caches the latest \texttt{DateTime} for use in logs; warns if the clock is not running.
+\end{itemize}
+
+\subsection{SD Logger}
+
+\begin{itemize}
+  \item Files: \texttt{src/storage/sd/sdlogger.*}
+  \item Initialises the SD card, creates \texttt{data.csv} with a header if missing, and logs aggregated sensor data once per second.
+  \item CSV columns: sample index, seconds since boot, DHT temperature/humidity, BH1750 lux, GPS status (fix, latitude, longitude, satellites, HDOP, speed, altitude) and UTC time.
+\end{itemize}
+
+\section{Extending the Project}
+
+\subsection{Adding Modules}
+
+\begin{enumerate}
+  \item Place new modules under \texttt{src/sensors/} or \texttt{src/actuators/} (or create another subdomain).
+  \item Provide matching header/implementation files exposing \texttt{init} and \texttt{update} hooks.
+  \item Keep modules non-blocking; coordinate periodic work via timestamps passed from the main loop.
+  \item Register the module in \texttt{src/main.cpp} and declare extra dependencies in \texttt{platformio.ini}.
+\end{enumerate}
+
+\subsection{Testing Suggestions}
+
+\begin{itemize}
+  \item Use PlatformIO unit tests for logic separable from hardware.
+  \item For hardware regression, stream serial output to a host script or log file for later analysis.
+  \item When many modules print to Serial, prefix messages (e.g., \texttt{[DHT]} / \texttt{[SD]}) for clarity.
+\end{itemize}
+
+\section{Contribution Guidelines}
+
+\begin{itemize}
+  \item Follow the directory conventions outlined above.
+  \item Document any new wiring requirements in this file and in code comments where necessary.
+  \item Keep code comments concise, focusing on non-obvious behaviour or hardware nuances.
+  \item Provide test evidence or reproduction steps in pull requests.
+\end{itemize}
+
+\section{Licensing}
+
+Select an open-source licence (MIT, Apache-2.0, GPL-3.0, etc.), place the text in a \texttt{LICENSE} file at the repository root, and reference it here once chosen.
+
+\section{Document Compilation}
+
+Build this document with:
+\begin{verbatim}
+pdflatex docs/project_documentation.tex
+\end{verbatim}
+Run twice to resolve the table of contents.
+
+\section{Acknowledgements}
+
+This project relies on community-maintained libraries from Adafruit, TinyGPSPlus, and the BH1750 ecosystem. Please consider contributing improvements back to those upstream projects.
+
+\end{document}

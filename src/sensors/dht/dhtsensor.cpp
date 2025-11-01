@@ -1,6 +1,7 @@
 #include "dhtsensor.h"
 
 #include <DHT.h>
+#include <math.h>
 
 namespace {
 constexpr uint8_t DHTPIN = 2;
@@ -9,6 +10,10 @@ constexpr unsigned long DHT_INTERVAL_MS = 2000;
 
 DHT dht(DHTPIN, DHTTYPE);
 unsigned long lastDhtRead = 0;
+unsigned long lastSuccessfulRead = 0;
+float lastHumidity = NAN;
+float lastTemperature = NAN;
+bool hasValidReading = false;
 }  // namespace
 
 void dhtInit() {
@@ -31,9 +36,30 @@ void dhtUpdate(unsigned long now) {
     return;
   }
 
+  lastHumidity = humidity;
+  lastTemperature = temperature;
+  hasValidReading = true;
+  lastSuccessfulRead = now;
+
   Serial.print(F("Humidity: "));
   Serial.print(humidity);
   Serial.print(F("%  |  Temperature: "));
   Serial.print(temperature);
   Serial.println(F(" C"));
+}
+
+bool dhtHasValidReading() {
+  return hasValidReading;
+}
+
+float dhtGetLastHumidity() {
+  return lastHumidity;
+}
+
+float dhtGetLastTemperature() {
+  return lastTemperature;
+}
+
+unsigned long dhtGetLastReadMillis() {
+  return lastSuccessfulRead;
 }

@@ -1,0 +1,280 @@
+\documentclass[a4paper,12pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{listings}
+
+\geometry{margin=2.5cm}
+\title{\textbf{Weather Station Firmware Plan}\\Based on ``Mode de fonctionnement station météo''}
+\author{CESI Engineering Project}
+\date{}
+
+\begin{document}
+\maketitle
+
+\tableofcontents
+\newpage
+
+\section{Objective}
+Develop an Arduino-based weather station firmware managing \textbf{four operating modes}:
+\begin{itemize}
+  \item Standard mode
+  \item Configuration mode
+  \item Maintenance mode
+  \item Economic mode
+\end{itemize}
+
+The system performs sensor acquisition, data logging on SD card, RTC time management, and LED indication.
+
+---
+
+\section{Hardware and Pin Assignments}
+
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{Component} & \textbf{Function} & \textbf{Arduino Pin} \\ \hline
+DHT11 & Temperature \& Humidity & D2 \\ \hline
+GPS Module & TX/RX (SoftwareSerial) & D3 / D4 \\ \hline
+RGB LED & Red / Green / Blue & D8 / D5 / D6 \\ \hline
+Buttons & Red / Green & D7 / D9 \\ \hline
+SD Card Module & SPI (CS, MOSI, MISO, SCK) & D10, D11, D12, D13 \\ \hline
+BH1750 + TinyRTC & I²C bus & A4 (SDA), A5 (SCL) \\ \hline
+TinyRTC DS18B20 (optional) & 1-Wire temperature & A0 \\ \hline
+\end{longtable}
+
+---
+
+\section{Core Operating Modes}
+
+\subsection{Standard Mode}
+\begin{itemize}
+  \item \textbf{Activation:} Normal power-up (no button pressed)
+  \item \textbf{Operation:}
+  \begin{itemize}
+    \item Acquires all sensor values every \texttt{LOG\_INTERVAL = 10 min (default)}.
+    \item Timeout for each sensor: \texttt{TIMEOUT = 30s}.
+    \item Unresponsive sensor → logs ``NA''.
+    \item Records all measurements in a timestamped line on SD card.
+    \item File naming: \texttt{YYMMDD\_0.LOG}.
+    \item When file reaches \texttt{FILE\_MAX\_SIZE = 2kB}, duplicate and restart.
+  \end{itemize}
+  \item \textbf{LED:} Green steady.
+  \item \textbf{Switch:} 
+  \begin{itemize}
+    \item Red long press (5s) → Maintenance mode.
+    \item Green long press (5s) → Economic mode.
+  \end{itemize}
+\end{itemize}
+
+---
+
+\subsection{Configuration Mode}
+\begin{itemize}
+  \item \textbf{Activation:} Hold red button during startup.
+  \item \textbf{Functions:}
+  \begin{itemize}
+    \item Sensor readings disabled.
+    \item Access configuration via UART console.
+    \item EEPROM-stored parameters configurable:
+\begin{lstlisting}[language=C]
+LOG_INTERVAL=10
+FILE_MAX_SIZE=4096
+TIMEOUT=30
+RESET
+VERSION
+\end{lstlisting}
+    \item Sensor enable and thresholds:
+\begin{lstlisting}[language=C]
+LUMIN=1
+TEMP_AIR=1
+HYGR=1
+PRESSURE=1
+\end{lstlisting}
+    \item Set RTC clock:
+\begin{lstlisting}[language=C]
+CLOCK=14:30:00
+DATE=11,01,2025
+DAY=SAT
+\end{lstlisting}
+  \end{itemize}
+  \item \textbf{Auto exit:} after 30 minutes of inactivity.
+  \item \textbf{LED:} Yellow steady.
+\end{itemize}
+
+---
+
+\subsection{Maintenance Mode}
+\begin{itemize}
+  \item \textbf{Activation:} Hold red button 5s (from Standard or Economic).
+  \item \textbf{Operation:}
+  \begin{itemize}
+    \item Stop SD writing.
+    \item Display live data on serial monitor.
+    \item SD card safe to remove and reinsert.
+  \end{itemize}
+  \item \textbf{Exit:} Red button long press (5s).
+  \item \textbf{LED:} Orange steady.
+\end{itemize}
+
+---
+
+\subsection{Economic Mode}
+\begin{itemize}
+  \item \textbf{Activation:} Hold green button 5s (from Standard).
+  \item \textbf{Operation:}
+  \begin{itemize}
+    \item Reduce power by disabling non-critical sensors (GPS).
+    \item Double \texttt{LOG\_INTERVAL}.
+  \end{itemize}
+  \item \textbf{Exit:} Red button long press (5s).
+  \item \textbf{LED:} Blue steady.
+\end{itemize}
+
+---
+
+\section{LED Status Codes}
+
+\begin{longtable}{|l|l|}
+\hline
+\textbf{LED Pattern} & \textbf{System State} \\ \hline
+Green steady & Standard mode \\ \hline
+Yellow steady & Configuration mode \\ \hline
+Blue steady & Economic mode \\ \hline
+Orange steady & Maintenance mode \\ \hline
+Red + Blue blink (1Hz) & RTC access error \\ \hline
+Red + Yellow blink (1Hz) & GPS access error \\ \hline
+Red + Green blink (1Hz) & Sensor access error \\ \hline
+Red short + Green long & Incoherent sensor data \\ \hline
+Red + White blink (1Hz) & SD card full \\ \hline
+Red short + White long & SD write error \\ \hline
+\end{longtable}
+
+---
+
+\section{Software Architecture}
+
+\begin{verbatim}
+setup():
+ ├─ initSerial()
+ ├─ initLED()
+ ├─ initButtons()
+ ├─ initI2C() → BH1750 + RTC
+ ├─ initSensors() (DHT11, GPS, etc.)
+ ├─ initSD()
+ ├─ detectStartupMode()
+ └─ showModeLED()
+
+loop():
+ ├─ checkButtons() → detect long presses
+ ├─ handleModeSwitch()
+ ├─ runCurrentMode()
+ └─ blinkErrorLEDs()
+\end{verbatim}
+
+Each mode is handled by:
+\begin{itemize}
+  \item \texttt{runStandardMode()}
+  \item \texttt{runConfigMode()}
+  \item \texttt{runMaintenanceMode()}
+  \item \texttt{runEcoMode()}
+\end{itemize}
+
+---
+
+\section{Data Logging}
+
+\begin{itemize}
+  \item Each measurement logged as one CSV line:
+\begin{lstlisting}
+yyyy-mm-dd hh:mm:ss, tempC, humidity, lux, pressure, GPS_lat, GPS_long
+\end{lstlisting}
+  \item Timeout → ``NA''.
+  \item File rotation: when size exceeds \texttt{FILE\_MAX\_SIZE}, create new revision file.
+  \item SD full → Red/White blink.
+  \item SD error → Red short/White long.
+\end{itemize}
+
+---
+
+\section{EEPROM Configuration}
+
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{Parameter} & \textbf{Type} & \textbf{Default} \\ \hline
+LOG\_INTERVAL & uint16\_t (min) & 10 \\ \hline
+FILE\_MAX\_SIZE & uint16\_t (bytes) & 2048 \\ \hline
+TIMEOUT & uint16\_t (sec) & 30 \\ \hline
+Sensor enable flags & uint8\_t & 1 \\ \hline
+Thresholds & int16\_t & Vary \\ \hline
+\end{longtable}
+
+---
+
+\section{RTC Integration}
+\begin{itemize}
+  \item RTC: TinyRTC DS1307 via I²C.
+  \item Set automatically at first boot.
+  \item Manual configuration via serial commands.
+  \item RTC failure → Red + Blue blinking.
+\end{itemize}
+
+---
+
+\section{GPS Integration}
+\begin{itemize}
+  \item Connected via SoftwareSerial (D3/D4).
+  \item Economic mode → sampled once every 2 cycles.
+  \item Timeout → ``NA'' + Red/Yellow blink.
+\end{itemize}
+
+---
+
+\section{Error Handling Table}
+
+\begin{longtable}{|l|l|l|}
+\hline
+\textbf{Error} & \textbf{Action} & \textbf{LED Pattern} \\ \hline
+RTC unreachable & Skip timestamp & Red + Blue \\ \hline
+GPS no data & Skip GPS & Red + Yellow \\ \hline
+Sensor timeout & Mark NA & Red + Green \\ \hline
+Incoherent data & Ignore & Red short / Green long \\ \hline
+SD full & Stop logging & Red + White \\ \hline
+SD write fail & Retry & Red short / White long \\ \hline
+\end{longtable}
+
+---
+
+\section{Test Plan}
+
+\begin{longtable}{|l|l|}
+\hline
+\textbf{Test} & \textbf{Expected Result} \\ \hline
+Power-on (no button) & Green LED, data logged \\ \hline
+Red press on start & Yellow LED, config mode \\ \hline
+Red long press & Orange LED, SD safe \\ \hline
+Green long press & Blue LED, GPS slowed \\ \hline
+RTC unplugged & Red+Blue blink \\ \hline
+SD full & Red+White blink \\ \hline
+No battery & Time reset \\ \hline
+\end{longtable}
+
+---
+
+\section{Deliverables}
+\begin{enumerate}
+  \item \texttt{main.ino} – main loop and mode logic
+  \item \texttt{ConfigManager.cpp/h} – EEPROM storage
+  \item \texttt{ModeManager.cpp/h} – mode management
+  \item \texttt{SensorDrivers/} – DHT, BH1750, GPS, RTC, SD
+  \item LED state machine implementation
+  \item README.md with wiring + usage
+  \item Validation document
+\end{enumerate}
+
+\end{document}
